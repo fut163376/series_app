@@ -1,5 +1,8 @@
 name: Build APK
 
+permissions:
+  contents: write
+
 on:
   push:
     branches:
@@ -40,3 +43,13 @@ jobs:
           name: tv-navegador-apk
           path: dist/tv-navegador.apk
           if-no-files-found: error
+
+      - name: Publicar APK como release descargable
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete tv-navegador-latest --yes --cleanup-tag || true
+          gh release create tv-navegador-latest dist/tv-navegador.apk \
+            --target "$GITHUB_SHA" \
+            --title "TV Navegador - ultima compilacion" \
+            --notes "APK de depuracion, instalable directamente en Android TV, movil o tablet."

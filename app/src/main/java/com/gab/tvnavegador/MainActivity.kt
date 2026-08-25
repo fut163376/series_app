@@ -5,7 +5,6 @@ import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.os.Message
 import android.os.SystemClock
@@ -49,6 +48,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var hint: TextView
     private lateinit var prefs: Prefs
 
+    private var chromeClient: WebChromeClient? = null
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private var longBackHandled = false
@@ -83,9 +83,9 @@ class MainActivity : AppCompatActivity() {
         showHint("Mantén ATRÁS para abrir el menú")
     }
 
-    override fun onNewIntent(intent: Intent?) {
+    override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        intent?.dataString?.takeIf { it.isNotBlank() }?.let { webView.loadUrl(it) }
+        intent.dataString?.takeIf { it.isNotBlank() }?.let { webView.loadUrl(it) }
     }
 
     override fun onPause() {
@@ -162,7 +162,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        webView.webChromeClient = object : WebChromeClient() {
+        chromeClient = object : WebChromeClient() {
 
             override fun onProgressChanged(view: WebView, newProgress: Int) {
                 progress.progress = newProgress
@@ -217,14 +217,14 @@ class MainActivity : AppCompatActivity() {
                         request: WebResourceRequest
                     ): Boolean {
                         request.url?.let { webView.loadUrl(it.toString()) }
-                        proxy.destroy()
+                        proxy.post { proxy.destroy() }
                         return true
                     }
 
                     @Suppress("DEPRECATION")
                     override fun shouldOverrideUrlLoading(v: WebView, url: String?): Boolean {
                         url?.let { webView.loadUrl(it) }
-                        proxy.destroy()
+                        proxy.post { proxy.destroy() }
                         return true
                     }
                 }
@@ -242,6 +242,7 @@ class MainActivity : AppCompatActivity() {
                 else request.deny()
             }
         }
+        webView.webChromeClient = chromeClient
 
         // Descargas: se delegan al gestor del sistema.
         webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
@@ -452,7 +453,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun goBackOrExit() {
         when {
-            customView != null -> webView.webChromeClient?.onHideCustomView()
+            customView != null -> chromeClient?.onHideCustomView()
             webView.canGoBack() -> webView.goBack()
             else -> confirmExit()
         }
