@@ -20,15 +20,27 @@ conoce ni interpreta el contenido de ningún sitio concreto.
 
 | Tecla | Acción |
 |---|---|
-| D-pad | Mueve el puntero (mantén pulsado para acelerar) |
-| OK | Clic en la posición del puntero |
+| D-pad | Salta entre los elementos de la web |
+| OK | Activa el elemento marcado |
 | ATRÁS | Página anterior |
 | ATRÁS (mantener) | Abre el menú |
 | PLAY / PAUSA | Reproduce o pausa el vídeo |
 | AVANCE / RETROCESO | Salta 10 segundos |
 
+El elemento con el foco se marca con un recuadro azul y la página se
+desplaza sola para mantenerlo a la vista, como en una app nativa de TV.
+
 Con el vídeo a pantalla completa, izquierda y derecha saltan en el tiempo y
 OK reproduce o pausa.
+
+### Modos del mando
+
+- **Elementos** (por defecto): el D-pad recorre enlaces, botones, tarjetas y
+  campos de la página eligiendo el destino por geometría. Si no hay ningún
+  elemento en esa dirección, desplaza la página.
+- **Puntero**: mueve un cursor de ratón por la pantalla, útil en webs con
+  zonas activas que no son elementos reconocibles.
+- **Desplazamiento**: deja el comportamiento nativo del WebView.
 
 ## Menú
 
@@ -38,7 +50,7 @@ Se abre manteniendo **ATRÁS** (o con la tecla MENU si el mando la tiene):
 - Marcadores: añadir, abrir y eliminar
 - Página de inicio: ir y fijar la actual
 - Recargar, atrás, adelante
-- Modo del mando: **puntero** o **desplazamiento**
+- Modo del mando: **elementos**, **puntero** o **desplazamiento**
 - Vista **escritorio** o **móvil** (cambia el user-agent)
 - Zoom de la página, del 50 % al 200 %
 - Reproducir/pausar y forzar pantalla completa del vídeo
@@ -51,6 +63,11 @@ Se abre manteniendo **ATRÁS** (o con la tecla MENU si el mando la tiene):
   propias y de terceros, contenido mixto, `window.open` redirigido a la misma
   vista, vídeo HTML5 con pantalla completa y reproducción sin gesto previo.
 - Se concede `PROTECTED_MEDIA_ID` para que funcione el vídeo con DRM.
+- La navegación por elementos se inyecta como JavaScript en cada carga y en
+  las navegaciones de las webs de una sola página. Descubre los candidatos
+  por selector (enlaces, botones, controles, roles ARIA) y por heurística de
+  `cursor: pointer`, descarta contenedores que envuelven a otros candidatos y
+  puntúa el destino por distancia y alineación en el eje perpendicular.
 - La página de inicio, el zoom y el modo del mando se guardan entre sesiones.
 
 ## Compilar

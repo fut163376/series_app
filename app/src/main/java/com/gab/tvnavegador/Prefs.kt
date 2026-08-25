@@ -25,10 +25,15 @@ class Prefs(context: Context) {
         get() = sp.getString(KEY_LAST, "") ?: ""
         set(value) = sp.edit().putString(KEY_LAST, value).apply()
 
-    /** true = el D-pad mueve un puntero; false = el D-pad desplaza la pagina. */
-    var cursorMode: Boolean
-        get() = sp.getBoolean(KEY_CURSOR, true)
-        set(value) = sp.edit().putBoolean(KEY_CURSOR, value).apply()
+    /**
+     * Forma de manejar la pagina con el D-pad:
+     * [NAV_SPATIAL] salta entre los elementos de la web como una app nativa,
+     * [NAV_CURSOR] mueve un puntero de raton y
+     * [NAV_SCROLL] deja el desplazamiento nativo del WebView.
+     */
+    var navMode: Int
+        get() = sp.getInt(KEY_NAV_MODE, NAV_SPATIAL)
+        set(value) = sp.edit().putInt(KEY_NAV_MODE, value).apply()
 
     /** true = user-agent de escritorio (mejor aprovechamiento de la pantalla grande). */
     var desktopUa: Boolean
@@ -87,12 +92,19 @@ class Prefs(context: Context) {
         /** Editable por el usuario desde el menu; solo es el valor inicial. */
         const val DEFAULT_HOME = "https://enlaces.ly/"
 
+        /** El D-pad recorre los elementos de la web. Es el modo por defecto. */
+        const val NAV_SPATIAL = 0
+        /** El D-pad mueve un puntero de raton sobre la pagina. */
+        const val NAV_CURSOR = 1
+        /** El D-pad desplaza la pagina sin puntero ni resaltado. */
+        const val NAV_SCROLL = 2
+
         const val MIN_ZOOM = 50
         const val MAX_ZOOM = 220
 
         private const val KEY_HOME = "home"
         private const val KEY_LAST = "last_url"
-        private const val KEY_CURSOR = "cursor_mode"
+        private const val KEY_NAV_MODE = "nav_mode"
         private const val KEY_DESKTOP_UA = "desktop_ua"
         private const val KEY_ZOOM = "zoom"
         private const val KEY_RESTORE = "restore_last"

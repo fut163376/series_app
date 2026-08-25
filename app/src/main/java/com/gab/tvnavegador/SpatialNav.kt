@@ -1,0 +1,313 @@
+package com.gab.tvnavegador
+
+/**
+ * Motor de navegacion espacial que se inyecta en cada pagina.
+ *
+ * En lugar de un puntero de raton, el D-pad salta directamente entre los
+ * elementos accionables de la web (enlaces, botones, tarjetas, campos) igual
+ * que en una aplicacion nativa de television: se resalta el elemento con foco,
+ * se desplaza solo hasta ponerlo a la vista y OK lo activa.
+ *
+ * El script es agnostico del sitio: descubre los candidatos por selector y por
+ * heuristica de estilo, y elige el destino por geometria.
+ */
+object SpatialNav {
+
+    /** Se inyecta al terminar de cargar cada pagina. Es idempotente. */
+    val INSTALL = """
+(function () {
+  if (window.__tvnav) { window.__tvnav.rescan(); return 'ready'; }
+
+  var ACCENT = '#4FC3F7';
+  var CACHE_MS = 500;
+  var MAX_SCAN = 6000;
+
+  var current = null;
+  var cache = null;
+  var cacheAt = 0;
+  var box = null;
+
+  // ------------------------------------------------------------- resaltado
+
+  function overlay() {
+    if (box && box.parentNode) { return box; }
+    box = document.createElement('div');
+    box.setAttribute('data-tvnav', 'highlight');
+    var s = box.style;
+    s.position = 'fixed';
+    s.zIndex = '2147483647';
+    s.pointerEvents = 'none';
+    s.border = '3px solid ' + ACCENT;
+    s.borderRadius = '6px';
+    s.boxShadow = '0 0 0 2px rgba(0,0,0,.55), 0 0 14px rgba(79,195,247,.85)';
+    s.transition = 'top .12s ease, left .12s ease, width .12s ease, height .12s ease';
+    s.display = 'none';
+    (document.body || document.documentElement).appendChild(box);
+    return box;
+  }
+
+  function paint() {
+    var b = overlay();
+    if (!current || !inDom(current)) { b.style.display = 'none'; return; }
+    var r = current.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) { b.style.display = 'none'; return; }
+    b.style.display = 'block';
+    b.style.top = (r.top - 2) + 'px';
+    b.style.left = (r.left - 2) + 'px';
+    b.style.width = (r.width) + 'px';
+    b.style.height = (r.height) + 'px';
+  }
+
+  function inDom(el) {
+    return el && el.isConnected !== false && document.contains(el);
+  }
+
+  // ------------------------------------------------------------ candidatos
+
+  var SELECTOR = [
+    'a[href]', 'button', 'input:not([type=hidden])', 'select', 'textarea',
+    'video', 'audio', 'iframe', 'summary', 'area[href]',
+    '[tabindex]:not([tabindex="-1"])', '[onclick]', '[contenteditable=true]',
+    '[role=button]', '[role=link]', '[role=menuitem]', '[role=tab]',
+    '[role=option]', '[role=checkbox]', '[role=radio]', '[role=switch]'
+  ].join(',');
+
+  function visible(el) {
+    var r = el.getBoundingClientRect();
+    if (r.width < 8 || r.height < 8) { return false; }
+    // Fuera del documento por completo (algunos menus se ocultan asi).
+    if (r.bottom < -window.innerHeight || r.top > window.innerHeight * 2) { return false; }
+    var st = window.getComputedStyle(el);
+    if (!st) { return false; }
+    if (st.visibility === 'hidden' || st.display === 'none') { return false; }
+    if (parseFloat(st.opacity || '1') < 0.05) { return false; }
+    if (el.disabled) { return false; }
+    return true;
+  }
+
+  function collect() {
+    var now = Date.now();
+    if (cache && (now - cacheAt) < CACHE_MS) { return cache; }
+
+    var found = [];
+    var seen = [];
+    var base;
+    try { base = document.querySelectorAll(SELECTOR); } catch (e) { base = []; }
+    for (var i = 0; i < base.length && i < MAX_SCAN; i++) {
+      if (visible(base[i])) { found.push(base[i]); seen.push(base[i]); }
+    }
+
+    // Muchas webs construyen tarjetas y botones con <div> y un manejador de
+    // clic que no se puede detectar; se aproxima por el cursor de puntero.
+    var all;
+    try { all = document.querySelectorAll('div,span,li,td,article,section,figure,img,p,h1,h2,h3'); }
+    catch (e2) { all = []; }
+    var limit = Math.min(all.length, MAX_SCAN);
+    for (var j = 0; j < limit; j++) {
+      var el = all[j];
+      if (seen.indexOf(el) !== -1) { continue; }
+      var cs = window.getComputedStyle(el);
+      if (!cs || cs.cursor !== 'pointer') { continue; }
+      if (!visible(el)) { continue; }
+      found.push(el);
+    }
+
+    // Si un candidato contiene a otro, nos quedamos con el mas interno para no
+    // seleccionar contenedores enormes.
+    var out = [];
+    for (var k = 0; k < found.length; k++) {
+      var e = found[k];
+      var wraps = false;
+      for (var m = 0; m < found.length; m++) {
+        if (m !== k && e.contains(found[m])) { wraps = true; break; }
+      }
+      if (!wraps) { out.push(e); }
+    }
+
+    cache = out;
+    cacheAt = now;
+    return out;
+  }
+
+  // ------------------------------------------------------------- geometria
+
+  function pick(dir) {
+    var list = collect();
+    if (!list.length) { return null; }
+
+    if (!current || !inDom(current)) {
+      // Primer salto: el candidato mas arriba y a la izquierda que se vea.
+      var best0 = null, bs0 = Infinity;
+      for (var i = 0; i < list.length; i++) {
+        var r0 = list[i].getBoundingClientRect();
+        if (r0.bottom < 0 || r0.top > window.innerHeight) { continue; }
+        var s0 = r0.top * 2 + r0.left;
+        if (s0 < bs0) { bs0 = s0; best0 = list[i]; }
+      }
+      return best0 || list[0];
+    }
+
+    var a = current.getBoundingClientRect();
+    var best = null, bestScore = Infinity;
+    var TOL = 6;
+
+    for (var n = 0; n < list.length; n++) {
+      var cand = list[n];
+      if (cand === current) { continue; }
+      var b = cand.getBoundingClientRect();
+
+      var primary, orth, overlap;
+      if (dir === 'right') {
+        primary = b.left - a.right;
+        orth = Math.abs((b.top + b.height / 2) - (a.top + a.height / 2));
+        overlap = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+      } else if (dir === 'left') {
+        primary = a.left - b.right;
+        orth = Math.abs((b.top + b.height / 2) - (a.top + a.height / 2));
+        overlap = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+      } else if (dir === 'down') {
+        primary = b.top - a.bottom;
+        orth = Math.abs((b.left + b.width / 2) - (a.left + a.width / 2));
+        overlap = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+      } else {
+        primary = a.top - b.bottom;
+        orth = Math.abs((b.left + b.width / 2) - (a.left + a.width / 2));
+        overlap = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+      }
+
+      if (primary < -TOL) { continue; }
+      if (primary < 0) { primary = 0; }
+
+      // Alineado en el eje perpendicular: se prefiere con mucha diferencia,
+      // que es lo que hace que las rejillas de caratulas se recorran bien.
+      var score = (overlap > 0)
+        ? primary + orth * 0.4
+        : primary + orth * 3 + 300;
+
+      if (score < bestScore) { bestScore = score; best = cand; }
+    }
+    return best;
+  }
+
+  function reveal(el) {
+    var r = el.getBoundingClientRect();
+    var fully = r.top >= 0 && r.left >= 0 &&
+                r.bottom <= window.innerHeight && r.right <= window.innerWidth;
+    if (fully) { return; }
+    try {
+      el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+    } catch (e) {
+      el.scrollIntoView();
+    }
+  }
+
+  function focus(el) {
+    current = el;
+    try {
+      if (el.focus) { el.focus({ preventScroll: true }); }
+    } catch (e) {
+      try { el.focus(); } catch (e2) { /* algunos nodos no son enfocables */ }
+    }
+    reveal(el);
+    paint();
+    // El desplazamiento suave mueve el rectangulo: se repinta al asentarse.
+    setTimeout(paint, 160);
+    setTimeout(paint, 380);
+  }
+
+  // ------------------------------------------------------------- acciones
+
+  function move(dir) {
+    var next = pick(dir);
+    if (next) { focus(next); return 'moved'; }
+
+    // Sin candidato en esa direccion: se desplaza la pagina, para que las
+    // paginas largas sigan siendo recorribles.
+    var dy = (dir === 'down') ? 1 : (dir === 'up' ? -1 : 0);
+    var dx = (dir === 'right') ? 1 : (dir === 'left' ? -1 : 0);
+    var amount = dy !== 0 ? window.innerHeight * 0.8 : window.innerWidth * 0.8;
+    try {
+      window.scrollBy({ top: dy * amount, left: dx * amount, behavior: 'smooth' });
+    } catch (e) {
+      window.scrollBy(dx * amount, dy * amount);
+    }
+    cache = null;
+    setTimeout(paint, 220);
+    return 'scrolled';
+  }
+
+  function fire(el, type) {
+    var r = el.getBoundingClientRect();
+    var init = {
+      bubbles: true, cancelable: true, view: window,
+      clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+      button: 0, buttons: (type === 'mouseup' || type === 'click') ? 0 : 1
+    };
+    var ev = null;
+    if (type.indexOf('pointer') === 0 && window.PointerEvent) {
+      init.pointerId = 1; init.pointerType = 'touch'; init.isPrimary = true;
+      try { ev = new PointerEvent(type, init); } catch (e) { ev = null; }
+    }
+    if (!ev) {
+      try { ev = new MouseEvent(type, init); }
+      catch (e2) {
+        ev = document.createEvent('MouseEvents');
+        ev.initEvent(type, true, true);
+      }
+    }
+    el.dispatchEvent(ev);
+  }
+
+  function activate() {
+    if (!current || !inDom(current)) { return 'none'; }
+    var el = current;
+    var tag = (el.tagName || '').toLowerCase();
+    var type = (el.getAttribute && (el.getAttribute('type') || '')).toLowerCase();
+
+    // Campos de texto: basta con enfocarlos para que salga el teclado de la TV.
+    if (tag === 'input' && ['text', 'search', 'email', 'url', 'tel', 'password', 'number', ''].indexOf(type) !== -1) {
+      el.focus(); return 'text';
+    }
+    if (tag === 'textarea' || el.isContentEditable) { el.focus(); return 'text'; }
+    if (tag === 'select') { el.focus(); return 'select'; }
+    if (tag === 'iframe') { try { el.focus(); } catch (e) {} return 'iframe'; }
+
+    // Secuencia completa: hay webs que escuchan pointer, otras mouse y otras click.
+    try { fire(el, 'pointerdown'); } catch (e) {}
+    try { fire(el, 'mousedown'); } catch (e) {}
+    try { el.focus({ preventScroll: true }); } catch (e) {}
+    try { fire(el, 'pointerup'); } catch (e) {}
+    try { fire(el, 'mouseup'); } catch (e) {}
+    try { fire(el, 'click'); } catch (e) {}
+    if (typeof el.click === 'function') {
+      try { el.click(); } catch (e) {}
+    }
+    cache = null;
+    return 'clicked';
+  }
+
+  function rescan() { cache = null; paint(); }
+
+  function clear() {
+    current = null;
+    if (box) { box.style.display = 'none'; }
+  }
+
+  window.addEventListener('scroll', paint, true);
+  window.addEventListener('resize', function () { cache = null; paint(); }, true);
+
+  window.__tvnav = {
+    move: move,
+    activate: activate,
+    rescan: rescan,
+    clear: clear
+  };
+  return 'installed';
+})();
+"""
+
+    fun move(direction: String) = "window.__tvnav && window.__tvnav.move('$direction');"
+
+    const val ACTIVATE = "window.__tvnav && window.__tvnav.activate();"
+    const val CLEAR = "window.__tvnav && window.__tvnav.clear();"
+}

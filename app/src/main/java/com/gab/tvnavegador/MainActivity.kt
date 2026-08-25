@@ -73,7 +73,7 @@ class MainActivity : AppCompatActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         configureWebView()
-        applyCursorMode()
+        applyNavMode()
 
         val start = intent?.dataString?.takeIf { it.isNotBlank() }
             ?: prefs.lastUrl.takeIf { prefs.restoreLast && it.isNotBlank() }
@@ -159,6 +159,13 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView, url: String?) {
                 super.onPageFinished(view, url)
                 url?.let { if (it.startsWith("http")) prefs.lastUrl = it }
+                installSpatialNav()
+            }
+
+            // Las webs de una sola pagina cambian de vista sin recargar.
+            override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
+                super.doUpdateVisitedHistory(view, url, isReload)
+                installSpatialNav()
             }
         }
 
@@ -187,6 +194,7 @@ class MainActivity : AppCompatActivity() {
                 fullscreenContainer.visibility = View.VISIBLE
                 webView.visibility = View.GONE
                 cursor.hideNow()
+                js(SpatialNav.CLEAR)
                 enterImmersive(true)
             }
 
@@ -199,7 +207,7 @@ class MainActivity : AppCompatActivity() {
                 customViewCallback?.onCustomViewHidden()
                 customViewCallback = null
                 enterImmersive(false)
-                applyCursorMode()
+                applyNavMode()
             }
 
             // Enlaces con target=_blank y window.open: se abren en esta misma vista
@@ -295,14 +303,20 @@ class MainActivity : AppCompatActivity() {
 
     // -------------------------------------------------------------- cursor
 
-    private fun applyCursorMode() {
-        if (prefs.cursorMode && customView == null) {
+    private fun applyNavMode() {
+        if (prefs.navMode == Prefs.NAV_CURSOR && customView == null) {
             cursor.visibility = View.VISIBLE
             cursor.wake()
         } else {
             cursor.visibility = View.GONE
         }
+        if (prefs.navMode == Prefs.NAV_SPATIAL) installSpatialNav() else js(SpatialNav.CLEAR)
         webView.requestFocus()
+    }
+
+    /** Inyecta el motor de navegacion espacial en la pagina actual. */
+    private fun installSpatialNav() {
+        if (prefs.navMode == Prefs.NAV_SPATIAL) js(SpatialNav.INSTALL)
     }
 
     /** Paso del puntero: cuanto mas se mantiene pulsado el D-pad, mas rapido va. */
@@ -406,20 +420,41 @@ class MainActivity : AppCompatActivity() {
             return false
         }
 
-        if (!prefs.cursorMode) return false
+        return when (prefs.navMode) {
+            Prefs.NAV_SPATIAL -> spatialKey(event)
+            Prefs.NAV_CURSOR -> cursorKey(event)
+            else -> false
+        }
+    }
 
+    /** El D-pad recorre los elementos accionables de la web. */
+    private fun spatialKey(event: KeyEvent): Boolean {
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP -> js(SpatialNav.move("up"))
+            KeyEvent.KEYCODE_DPAD_DOWN -> js(SpatialNav.move("down"))
+            KeyEvent.KEYCODE_DPAD_LEFT -> js(SpatialNav.move("left"))
+            KeyEvent.KEYCODE_DPAD_RIGHT -> js(SpatialNav.move("right"))
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
+            KeyEvent.KEYCODE_NUMPAD_ENTER, KeyEvent.KEYCODE_BUTTON_A ->
+                js(SpatialNav.ACTIVATE)
+            else -> return false
+        }
+        return true
+    }
+
+    /** El D-pad mueve un puntero de raton sobre la pagina. */
+    private fun cursorKey(event: KeyEvent): Boolean {
         val step = stepFor(event.repeatCount)
         when (event.keyCode) {
-            KeyEvent.KEYCODE_DPAD_UP -> { moveCursor(0f, -step); return true }
-            KeyEvent.KEYCODE_DPAD_DOWN -> { moveCursor(0f, step); return true }
-            KeyEvent.KEYCODE_DPAD_LEFT -> { moveCursor(-step, 0f); return true }
-            KeyEvent.KEYCODE_DPAD_RIGHT -> { moveCursor(step, 0f); return true }
+            KeyEvent.KEYCODE_DPAD_UP -> moveCursor(0f, -step)
+            KeyEvent.KEYCODE_DPAD_DOWN -> moveCursor(0f, step)
+            KeyEvent.KEYCODE_DPAD_LEFT -> moveCursor(-step, 0f)
+            KeyEvent.KEYCODE_DPAD_RIGHT -> moveCursor(step, 0f)
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
-            KeyEvent.KEYCODE_NUMPAD_ENTER, KeyEvent.KEYCODE_BUTTON_A -> {
-                clickAtCursor(); return true
-            }
+            KeyEvent.KEYCODE_NUMPAD_ENTER, KeyEvent.KEYCODE_BUTTON_A -> clickAtCursor()
+            else -> return false
         }
-        return false
+        return true
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
@@ -471,8 +506,11 @@ class MainActivity : AppCompatActivity() {
     // ----------------------------------------------------------------- menu
 
     private fun showMenu() {
-        val cursorLabel =
-            if (prefs.cursorMode) "Modo mando: puntero" else "Modo mando: desplazamiento"
+        val navLabel = "Modo del mando: " + when (prefs.navMode) {
+            Prefs.NAV_SPATIAL -> "elementos"
+            Prefs.NAV_CURSOR -> "puntero"
+            else -> "desplazamiento"
+        }
         val uaLabel =
             if (prefs.desktopUa) "Vista: escritorio" else "Vista: móvil"
 
@@ -485,7 +523,7 @@ class MainActivity : AppCompatActivity() {
             "Recargar",
             "Atrás",
             "Adelante",
-            cursorLabel,
+            navLabel,
             uaLabel,
             "Zoom: ${prefs.zoomPercent}%",
             "Reproducir / Pausar vídeo",
@@ -517,14 +555,7 @@ class MainActivity : AppCompatActivity() {
                     5 -> webView.reload()
                     6 -> if (webView.canGoBack()) webView.goBack()
                     7 -> if (webView.canGoForward()) webView.goForward()
-                    8 -> {
-                        prefs.cursorMode = !prefs.cursorMode
-                        applyCursorMode()
-                        showHint(
-                            if (prefs.cursorMode) "Puntero activado"
-                            else "El D-pad ahora desplaza la página"
-                        )
-                    }
+                    8 -> showNavModeDialog()
                     9 -> {
                         prefs.desktopUa = !prefs.desktopUa
                         applyUserAgent()
@@ -602,6 +633,30 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun showNavModeDialog() {
+        val labels = arrayOf(
+            "Elementos — salta por los enlaces y botones de la web",
+            "Puntero — mueve un cursor de ratón por la pantalla",
+            "Desplazamiento — solo mueve la página"
+        )
+        AlertDialog.Builder(this, R.style.DialogDark)
+            .setTitle("Modo del mando")
+            .setSingleChoiceItems(labels, prefs.navMode) { dialog, which ->
+                prefs.navMode = which
+                applyNavMode()
+                dialog.dismiss()
+                showHint(
+                    when (which) {
+                        Prefs.NAV_SPATIAL -> "El D-pad recorre los elementos de la web"
+                        Prefs.NAV_CURSOR -> "Puntero activado"
+                        else -> "El D-pad desplaza la página"
+                    }
+                )
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
     private fun showZoomDialog() {
         val options = intArrayOf(50, 75, 90, 100, 110, 125, 150, 175, 200)
         val labels = options.map { "$it%" }.toTypedArray()
@@ -633,8 +688,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun showHelp() {
         val text = """
-            D-pad — mueve el puntero (mantén pulsado para ir más rápido)
-            OK — hace clic donde esté el puntero
+            D-pad — salta entre los elementos de la web (el que tiene el
+            foco se marca con un recuadro azul)
+            OK — activa el elemento marcado
             ATRÁS — vuelve a la página anterior
             ATRÁS (mantener) — abre este menú
             PLAY/PAUSA — reproduce o pausa el vídeo
@@ -643,8 +699,9 @@ class MainActivity : AppCompatActivity() {
             Con el vídeo a pantalla completa, el D-pad izquierda y derecha
             salta en el tiempo y OK reproduce o pausa.
 
-            Si una web se maneja mejor sin puntero, cambia a
-            «Modo mando: desplazamiento» desde este menú.
+            Si una web concreta se recorre mal, cambia el «Modo del mando»
+            desde este menú: «Puntero» mueve un cursor de ratón y
+            «Desplazamiento» solo mueve la página.
         """.trimIndent()
 
         AlertDialog.Builder(this, R.style.DialogDark)
