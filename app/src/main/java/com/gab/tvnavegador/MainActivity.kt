@@ -398,6 +398,11 @@ class MainActivity : AppCompatActivity() {
             KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_BUTTON_Y -> {
                 showMenu(); return true
             }
+            // Atajo directo: las teclas que suelen sobrar en los mandos de TV.
+            KeyEvent.KEYCODE_PROG_YELLOW, KeyEvent.KEYCODE_INFO,
+            KeyEvent.KEYCODE_CAPTIONS, KeyEvent.KEYCODE_BUTTON_X -> {
+                cycleNavMode(); return true
+            }
             KeyEvent.KEYCODE_SEARCH -> {
                 showUrlDialog(); return true
             }
@@ -515,6 +520,7 @@ class MainActivity : AppCompatActivity() {
             if (prefs.desktopUa) "Vista: escritorio" else "Vista: móvil"
 
         val items = arrayOf(
+            navLabel,
             "Ir a una dirección…",
             "Marcadores",
             "Añadir esta página a marcadores",
@@ -523,7 +529,6 @@ class MainActivity : AppCompatActivity() {
             "Recargar",
             "Atrás",
             "Adelante",
-            navLabel,
             uaLabel,
             "Zoom: ${prefs.zoomPercent}%",
             "Reproducir / Pausar vídeo",
@@ -536,26 +541,26 @@ class MainActivity : AppCompatActivity() {
             .setTitle("Menú")
             .setItems(items) { _, which ->
                 when (which) {
-                    0 -> showUrlDialog()
-                    1 -> showBookmarks()
-                    2 -> {
+                    0 -> showNavModeDialog()
+                    1 -> showUrlDialog()
+                    2 -> showBookmarks()
+                    3 -> {
                         val u = webView.url
                         if (!u.isNullOrBlank()) {
                             prefs.addBookmark(webView.title ?: u, u)
                             showHint("Marcador añadido")
                         }
                     }
-                    3 -> webView.loadUrl(prefs.homePage)
-                    4 -> {
+                    4 -> webView.loadUrl(prefs.homePage)
+                    5 -> {
                         webView.url?.let {
                             prefs.homePage = it
                             showHint("Página de inicio actualizada")
                         }
                     }
-                    5 -> webView.reload()
-                    6 -> if (webView.canGoBack()) webView.goBack()
-                    7 -> if (webView.canGoForward()) webView.goForward()
-                    8 -> showNavModeDialog()
+                    6 -> webView.reload()
+                    7 -> if (webView.canGoBack()) webView.goBack()
+                    8 -> if (webView.canGoForward()) webView.goForward()
                     9 -> {
                         prefs.desktopUa = !prefs.desktopUa
                         applyUserAgent()
@@ -633,6 +638,19 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    /** Rota entre elementos, puntero y desplazamiento sin abrir el menu. */
+    private fun cycleNavMode() {
+        prefs.navMode = (prefs.navMode + 1) % 3
+        applyNavMode()
+        showHint(
+            when (prefs.navMode) {
+                Prefs.NAV_SPATIAL -> "Modo: elementos — el D-pad salta por la web"
+                Prefs.NAV_CURSOR -> "Modo: puntero — el D-pad mueve el cursor"
+                else -> "Modo: desplazamiento — el D-pad mueve la página"
+            }
+        )
+    }
+
     private fun showNavModeDialog() {
         val labels = arrayOf(
             "Elementos — salta por los enlaces y botones de la web",
@@ -695,6 +713,7 @@ class MainActivity : AppCompatActivity() {
             ATRÁS (mantener) — abre este menú
             PLAY/PAUSA — reproduce o pausa el vídeo
             AVANCE / RETROCESO — salta $SEEK_SECONDS segundos
+            AMARILLO / INFO — cambia de modo del mando al vuelo
 
             Con el vídeo a pantalla completa, el D-pad izquierda y derecha
             salta en el tiempo y OK reproduce o pausa.

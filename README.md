@@ -26,12 +26,25 @@ conoce ni interpreta el contenido de ningún sitio concreto.
 | ATRÁS (mantener) | Abre el menú |
 | PLAY / PAUSA | Reproduce o pausa el vídeo |
 | AVANCE / RETROCESO | Salta 10 segundos |
+| AMARILLO / INFO | Cambia de modo del mando al vuelo |
 
 El elemento con el foco se marca con un recuadro azul y la página se
 desplaza sola para mantenerlo a la vista, como en una app nativa de TV.
 
 Con el vídeo a pantalla completa, izquierda y derecha saltan en el tiempo y
 OK reproduce o pausa.
+
+### Cambiar de modo
+
+Tres formas, de más rápida a más explícita:
+
+1. Pulsa la tecla **AMARILLA** o **INFO** del mando: rota entre los tres modos
+   y muestra en pantalla en cuál has entrado.
+2. Mantén **ATRÁS** y pulsa OK: «Modo del mando» es la **primera** entrada del
+   menú.
+3. Desde esa entrada se abre un diálogo donde elegir el modo concreto.
+
+El modo elegido se recuerda entre sesiones.
 
 ### Modos del mando
 
