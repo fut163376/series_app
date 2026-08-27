@@ -21,6 +21,14 @@ object SpatialNav {
   var ACCENT = '#4FC3F7';
   var CACHE_MS = 500;
   var MAX_SCAN = 6000;
+  // Por encima de esto la comparacion por pares sale cara; se omite.
+  var MAX_PAIRWISE = 900;
+  // Un candidato por debajo de esta fraccion del area de otro es decoracion.
+  var SMALL_RATIO = 0.30;
+  // Fraccion del candidato pequeno que debe caer dentro del grande.
+  var INSIDE_RATIO = 0.75;
+  // Solo se recurre a cursor:pointer si la web expone menos candidatos reales.
+  var POINTER_SCAN_THRESHOLD = 25;
 
   var current = null;
   var cache = null;
@@ -85,59 +93,113 @@ object SpatialNav {
     return true;
   }
 
+  var stats = { base: 0, extras: 0, suppressed: 0 };
+
+  function measure(list) {
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      var r = list[i].getBoundingClientRect();
+      out.push({ el: list[i], r: r, a: r.width * r.height });
+    }
+    return out;
+  }
+
+  /**
+   * Descarta los candidatos pequenos que caen dentro de otro mas grande.
+   *
+   * Es el caso de los botones superpuestos sobre una tarjeta (favorito, marcar
+   * visto, reproducir): son muchos mas que las tarjetas y estan encima, asi
+   * que sin esto acaparan el foco y la tarjeta se vuelve casi inalcanzable.
+   * La comprobacion es geometrica, no de arbol, para pillar tambien los que
+   * estan posicionados en absoluto fuera del contenedor.
+   */
+  function suppressOverlays(items) {
+    if (items.length > MAX_PAIRWISE) {
+      stats.suppressed = 0;
+      return items.map(function (x) { return x.el; });
+    }
+    var keep = [];
+    var dropped = 0;
+    for (var i = 0; i < items.length; i++) {
+      var c = items[i];
+      var drop = false;
+      if (c.a > 0) {
+        for (var j = 0; j < items.length; j++) {
+          if (i === j) { continue; }
+          var p = items[j];
+          if (c.a >= p.a * SMALL_RATIO) { continue; }
+          var ox = Math.min(c.r.right, p.r.right) - Math.max(c.r.left, p.r.left);
+          var oy = Math.min(c.r.bottom, p.r.bottom) - Math.max(c.r.top, p.r.top);
+          if (ox <= 0 || oy <= 0) { continue; }
+          if ((ox * oy) >= c.a * INSIDE_RATIO) { drop = true; break; }
+        }
+      }
+      if (drop) { dropped++; } else { keep.push(c.el); }
+    }
+    stats.suppressed = dropped;
+    return keep;
+  }
+
   function collect() {
     var now = Date.now();
     if (cache && (now - cacheAt) < CACHE_MS) { return cache; }
 
-    var out = [];
+    var found = [];
     var base;
     try { base = document.querySelectorAll(SELECTOR); } catch (e) { base = []; }
     for (var i = 0; i < base.length && i < MAX_SCAN; i++) {
-      if (visible(base[i])) { out.push(base[i]); }
+      if (visible(base[i])) { found.push(base[i]); }
     }
+    stats.base = found.length;
+    stats.extras = 0;
 
-    // cursor:pointer es una propiedad heredada, asi que todo descendiente de
-    // un enlace o un boton la computa tambien. Solo interesan los elementos
-    // que NO cuelgan de un candidato real: esas son las tarjetas construidas
-    // con div y un manejador de clic, que es lo que no se puede detectar.
-    var extras = [];
-    var all;
-    try { all = document.querySelectorAll('div,span,li,td,article,section,figure,img'); }
-    catch (e2) { all = []; }
-    var limit = Math.min(all.length, MAX_SCAN);
-    for (var j = 0; j < limit; j++) {
-      var el = all[j];
-      if (el.closest) {
-        try { if (el.closest(SELECTOR)) { continue; } } catch (e3) { /* selector raro */ }
+    // La pasada por cursor:pointer obliga a un getComputedStyle por elemento,
+    // que es carisimo. Solo compensa cuando la web apenas expone candidatos
+    // reales, que es justo cuando las tarjetas son div con manejador de clic.
+    if (found.length < POINTER_SCAN_THRESHOLD) {
+      var extras = [];
+      var all;
+      try { all = document.querySelectorAll('div,span,li,td,article,section,figure,img'); }
+      catch (e2) { all = []; }
+      var limit = Math.min(all.length, MAX_SCAN);
+      for (var j = 0; j < limit; j++) {
+        var el = all[j];
+        if (el.closest) {
+          try { if (el.closest(SELECTOR)) { continue; } } catch (e3) { /* selector raro */ }
+        }
+        var cs = window.getComputedStyle(el);
+        if (!cs || cs.cursor !== 'pointer') { continue; }
+        if (!visible(el)) { continue; }
+        extras.push(el);
       }
-      var cs = window.getComputedStyle(el);
-      if (!cs || cs.cursor !== 'pointer') { continue; }
-      if (!visible(el)) { continue; }
-      extras.push(el);
-    }
-
-    // Solo entre los heuristicos descartamos el que envuelve a otro, para
-    // quedarnos con la tarjeta y no con la rejilla entera. A los candidatos
-    // reales no se les aplica: una tarjeta <a> con un boton dentro debe
-    // seguir siendo seleccionable por si misma.
-    for (var k = 0; k < extras.length; k++) {
-      var e = extras[k];
-      var wraps = false;
-      for (var m = 0; m < extras.length; m++) {
-        if (m !== k && e.contains(extras[m])) { wraps = true; break; }
+      // Entre los heuristicos, el que envuelve a otro sobra.
+      for (var k = 0; k < extras.length; k++) {
+        var e = extras[k];
+        var wraps = false;
+        for (var m = 0; m < extras.length; m++) {
+          if (m !== k && e.contains(extras[m])) { wraps = true; break; }
+        }
+        if (!wraps) { found.push(e); }
       }
-      if (!wraps) { out.push(e); }
+      stats.extras = found.length - stats.base;
     }
 
-    cache = out;
+    cache = suppressOverlays(measure(found));
     cacheAt = now;
-    return out;
+    return cache;
   }
 
   /** Datos de lo que ve el motor en esta pagina, para poder afinarlo. */
   function diagnose() {
     var list = collect();
-    var info = { total: list.length, focused: null, tags: {} };
+    var info = {
+      total: list.length,
+      base: stats.base,
+      extras: stats.extras,
+      suppressed: stats.suppressed,
+      focused: null,
+      tags: {}
+    };
     for (var i = 0; i < list.length; i++) {
       var t = (list[i].tagName || '?').toLowerCase();
       info.tags[t] = (info.tags[t] || 0) + 1;

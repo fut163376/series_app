@@ -647,8 +647,12 @@ class MainActivity : AppCompatActivity() {
                     val obj = JSONObject(
                         if (unwrapped is String) unwrapped else raw
                     )
-                    append("Elementos detectados: ")
+                    append("Elementos navegables: ")
                     append(obj.optInt("total", 0))
+                    append("\n  por selector: ").append(obj.optInt("base", 0))
+                    append("\n  por cursor:pointer: ").append(obj.optInt("extras", 0))
+                    append("\n  superpuestos descartados: ")
+                    append(obj.optInt("suppressed", 0))
                     append("\n\nReparto por etiqueta:\n")
                     val tags = obj.optJSONObject("tags")
                     if (tags != null) {

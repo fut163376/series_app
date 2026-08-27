@@ -102,6 +102,14 @@ Se puede desactivar desde el menú si alguna web lo necesita.
   propias y de terceros, contenido mixto, `window.open` redirigido a la misma
   vista, vídeo HTML5 con pantalla completa y reproducción sin gesto previo.
 - Se concede `PROTECTED_MEDIA_ID` para que funcione el vídeo con DRM.
+- Los candidatos pequeños que caen dentro de otro mayor (menos del 30 % de
+  su área, con el 75 % de la suya dentro) se descartan: son los botones
+  superpuestos sobre las tarjetas, que superan en número a las tarjetas y
+  acaparaban el foco. La comprobación es geométrica, no de árbol, para pillar
+  también los posicionados en absoluto.
+- La pasada por `cursor: pointer` solo se ejecuta si la web expone menos de
+  25 candidatos reales. Obliga a un `getComputedStyle` por elemento y en las
+  webs con enlaces y botones de verdad no aporta nada.
 - La navegación por elementos se inyecta como JavaScript en cada carga y en
   las navegaciones de las webs de una sola página. Descubre los candidatos
   por selector (enlaces, botones, controles, roles ARIA) y por heurística de
