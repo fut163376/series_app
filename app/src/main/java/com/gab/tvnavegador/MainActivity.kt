@@ -18,6 +18,7 @@ import android.webkit.CookieManager
 import android.webkit.PermissionRequest
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -28,6 +29,9 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import org.json.JSONObject
+import org.json.JSONTokener
+import java.io.ByteArrayInputStream
 
 /**
  * Navegador web pensado para manejarse con el mando de un Android TV.
@@ -156,16 +160,31 @@ class MainActivity : AppCompatActivity() {
             override fun shouldOverrideUrlLoading(view: WebView, url: String?): Boolean =
                 handleUrl(url)
 
+            // Corre en hilo secundario: AdBlocker es inmutable y atomico.
+            override fun shouldInterceptRequest(
+                view: WebView,
+                request: WebResourceRequest
+            ): WebResourceResponse? {
+                if (!prefs.blockAds) return null
+                val target = request.url?.toString() ?: return null
+                if (!AdBlocker.shouldBlock(target)) return null
+                return WebResourceResponse(
+                    "text/plain", "utf-8", ByteArrayInputStream(ByteArray(0))
+                )
+            }
+
             override fun onPageFinished(view: WebView, url: String?) {
                 super.onPageFinished(view, url)
                 url?.let { if (it.startsWith("http")) prefs.lastUrl = it }
                 installSpatialNav()
+                installAdBlock()
             }
 
             // Las webs de una sola pagina cambian de vista sin recargar.
             override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
                 super.doUpdateVisitedHistory(view, url, isReload)
                 installSpatialNav()
+                installAdBlock()
             }
         }
 
@@ -218,6 +237,13 @@ class MainActivity : AppCompatActivity() {
                 isUserGesture: Boolean,
                 resultMsg: Message
             ): Boolean {
+                // Con el bloqueador activo la ventana no llega a abrirse y la
+                // pagina actual se queda donde esta, que es justo lo que
+                // rompe los popunder.
+                if (prefs.blockAds) {
+                    showHint("Ventana emergente bloqueada")
+                    return false
+                }
                 val proxy = WebView(this@MainActivity)
                 proxy.webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(
@@ -280,7 +306,14 @@ class MainActivity : AppCompatActivity() {
      */
     private fun handleUrl(url: String?): Boolean {
         if (url.isNullOrBlank()) return false
-        if (url.startsWith("http://") || url.startsWith("https://")) return false
+        if (url.startsWith("http://") || url.startsWith("https://")) {
+            // Redireccion a un dominio de anuncios: se corta la navegacion.
+            if (prefs.blockAds && AdBlocker.shouldBlock(url)) {
+                showHint("Redirección publicitaria bloqueada")
+                return true
+            }
+            return false
+        }
         return try {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
             true
@@ -317,6 +350,11 @@ class MainActivity : AppCompatActivity() {
     /** Inyecta el motor de navegacion espacial en la pagina actual. */
     private fun installSpatialNav() {
         if (prefs.navMode == Prefs.NAV_SPATIAL) js(SpatialNav.INSTALL)
+    }
+
+    /** Inyecta el filtro cosmetico y la anulacion de window.open. */
+    private fun installAdBlock() {
+        if (prefs.blockAds) js(AdBlocker.COSMETIC_JS)
     }
 
     /** Paso del puntero: cuanto mas se mantiene pulsado el D-pad, mas rapido va. */
@@ -516,11 +554,16 @@ class MainActivity : AppCompatActivity() {
             Prefs.NAV_CURSOR -> "puntero"
             else -> "desplazamiento"
         }
-        val uaLabel =
-            if (prefs.desktopUa) "Vista: escritorio" else "Vista: móvil"
+        val blockLabel = if (prefs.blockAds) {
+            "Bloqueador: activado (" + AdBlocker.blockedCount + " bloqueados)"
+        } else {
+            "Bloqueador: desactivado"
+        }
+        val uaLabel = if (prefs.desktopUa) "Vista: escritorio" else "Vista: móvil"
 
         val items = arrayOf(
             navLabel,
+            blockLabel,
             "Ir a una dirección…",
             "Marcadores",
             "Añadir esta página a marcadores",
@@ -534,6 +577,7 @@ class MainActivity : AppCompatActivity() {
             "Reproducir / Pausar vídeo",
             "Vídeo a pantalla completa",
             "Borrar cookies y datos",
+            "Diagnóstico de navegación",
             "Ayuda del mando"
         )
 
@@ -542,39 +586,106 @@ class MainActivity : AppCompatActivity() {
             .setItems(items) { _, which ->
                 when (which) {
                     0 -> showNavModeDialog()
-                    1 -> showUrlDialog()
-                    2 -> showBookmarks()
-                    3 -> {
+                    1 -> {
+                        prefs.blockAds = !prefs.blockAds
+                        webView.reload()
+                        showHint(
+                            if (prefs.blockAds) "Bloqueador activado"
+                            else "Bloqueador desactivado"
+                        )
+                    }
+                    2 -> showUrlDialog()
+                    3 -> showBookmarks()
+                    4 -> {
                         val u = webView.url
                         if (!u.isNullOrBlank()) {
                             prefs.addBookmark(webView.title ?: u, u)
                             showHint("Marcador añadido")
                         }
                     }
-                    4 -> webView.loadUrl(prefs.homePage)
-                    5 -> {
+                    5 -> webView.loadUrl(prefs.homePage)
+                    6 -> {
                         webView.url?.let {
                             prefs.homePage = it
                             showHint("Página de inicio actualizada")
                         }
                     }
-                    6 -> webView.reload()
-                    7 -> if (webView.canGoBack()) webView.goBack()
-                    8 -> if (webView.canGoForward()) webView.goForward()
-                    9 -> {
+                    7 -> webView.reload()
+                    8 -> if (webView.canGoBack()) webView.goBack()
+                    9 -> if (webView.canGoForward()) webView.goForward()
+                    10 -> {
                         prefs.desktopUa = !prefs.desktopUa
                         applyUserAgent()
                         webView.reload()
                         showHint(if (prefs.desktopUa) "Vista de escritorio" else "Vista móvil")
                     }
-                    10 -> showZoomDialog()
-                    11 -> js(JsSnippets.TOGGLE_PLAY)
-                    12 -> js(JsSnippets.REQUEST_FULLSCREEN)
-                    13 -> clearBrowsingData()
-                    14 -> showHelp()
+                    11 -> showZoomDialog()
+                    12 -> js(JsSnippets.TOGGLE_PLAY)
+                    13 -> js(JsSnippets.REQUEST_FULLSCREEN)
+                    14 -> clearBrowsingData()
+                    15 -> showDiagnostics()
+                    16 -> showHelp()
                 }
             }
             .show()
+    }
+
+    /**
+     * Informe de lo que el motor de navegacion ve en la pagina actual. Sirve
+     * para afinar la heuristica contra una web concreta sin tener que abrirla.
+     */
+    private fun showDiagnostics() {
+        webView.evaluateJavascript(SpatialNav.DIAGNOSE) { raw ->
+            val report = buildString {
+                append("Página: ")
+                append(webView.url ?: "—")
+                append("\n\n")
+                try {
+                    // evaluateJavascript devuelve el valor codificado como JSON,
+                    // asi que la cadena viene envuelta una vez de mas.
+                    val unwrapped = JSONTokener(raw).nextValue()
+                    val obj = JSONObject(
+                        if (unwrapped is String) unwrapped else raw
+                    )
+                    append("Elementos detectados: ")
+                    append(obj.optInt("total", 0))
+                    append("\n\nReparto por etiqueta:\n")
+                    val tags = obj.optJSONObject("tags")
+                    if (tags != null) {
+                        val keys = tags.keys().asSequence().toList()
+                            .sortedByDescending { tags.optInt(it) }
+                        keys.take(10).forEach {
+                            append("  ").append(it).append(" = ")
+                                .append(tags.optInt(it)).append("\n")
+                        }
+                    }
+                    val f = obj.optJSONObject("focused")
+                    append("\nElemento con el foco:\n")
+                    if (f == null) {
+                        append("  ninguno todavía\n")
+                    } else {
+                        append("  <").append(f.optString("tag")).append(">")
+                        append("  ").append(f.optInt("w")).append("×")
+                            .append(f.optInt("h")).append(" px\n")
+                        val id = f.optString("id")
+                        if (id.isNotBlank()) append("  id: ").append(id).append("\n")
+                        val cls = f.optString("cls")
+                        if (cls.isNotBlank()) append("  class: ").append(cls).append("\n")
+                    }
+                } catch (e: Exception) {
+                    append("No se pudo leer el diagnóstico.\n")
+                    append("El motor puede no estar inyectado en esta página.\n")
+                }
+                append("\nPeticiones bloqueadas: ")
+                append(AdBlocker.blockedCount)
+            }
+
+            AlertDialog.Builder(this, R.style.DialogDark)
+                .setTitle("Diagnóstico de navegación")
+                .setMessage(report)
+                .setPositiveButton("Cerrar", null)
+                .show()
+        }
     }
 
     private fun showUrlDialog() {

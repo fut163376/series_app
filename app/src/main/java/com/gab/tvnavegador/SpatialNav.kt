@@ -89,37 +89,42 @@ object SpatialNav {
     var now = Date.now();
     if (cache && (now - cacheAt) < CACHE_MS) { return cache; }
 
-    var found = [];
-    var seen = [];
+    var out = [];
     var base;
     try { base = document.querySelectorAll(SELECTOR); } catch (e) { base = []; }
     for (var i = 0; i < base.length && i < MAX_SCAN; i++) {
-      if (visible(base[i])) { found.push(base[i]); seen.push(base[i]); }
+      if (visible(base[i])) { out.push(base[i]); }
     }
 
-    // Muchas webs construyen tarjetas y botones con <div> y un manejador de
-    // clic que no se puede detectar; se aproxima por el cursor de puntero.
+    // cursor:pointer es una propiedad heredada, asi que todo descendiente de
+    // un enlace o un boton la computa tambien. Solo interesan los elementos
+    // que NO cuelgan de un candidato real: esas son las tarjetas construidas
+    // con div y un manejador de clic, que es lo que no se puede detectar.
+    var extras = [];
     var all;
-    try { all = document.querySelectorAll('div,span,li,td,article,section,figure,img,p,h1,h2,h3'); }
+    try { all = document.querySelectorAll('div,span,li,td,article,section,figure,img'); }
     catch (e2) { all = []; }
     var limit = Math.min(all.length, MAX_SCAN);
     for (var j = 0; j < limit; j++) {
       var el = all[j];
-      if (seen.indexOf(el) !== -1) { continue; }
+      if (el.closest) {
+        try { if (el.closest(SELECTOR)) { continue; } } catch (e3) { /* selector raro */ }
+      }
       var cs = window.getComputedStyle(el);
       if (!cs || cs.cursor !== 'pointer') { continue; }
       if (!visible(el)) { continue; }
-      found.push(el);
+      extras.push(el);
     }
 
-    // Si un candidato contiene a otro, nos quedamos con el mas interno para no
-    // seleccionar contenedores enormes.
-    var out = [];
-    for (var k = 0; k < found.length; k++) {
-      var e = found[k];
+    // Solo entre los heuristicos descartamos el que envuelve a otro, para
+    // quedarnos con la tarjeta y no con la rejilla entera. A los candidatos
+    // reales no se les aplica: una tarjeta <a> con un boton dentro debe
+    // seguir siendo seleccionable por si misma.
+    for (var k = 0; k < extras.length; k++) {
+      var e = extras[k];
       var wraps = false;
-      for (var m = 0; m < found.length; m++) {
-        if (m !== k && e.contains(found[m])) { wraps = true; break; }
+      for (var m = 0; m < extras.length; m++) {
+        if (m !== k && e.contains(extras[m])) { wraps = true; break; }
       }
       if (!wraps) { out.push(e); }
     }
@@ -127,6 +132,29 @@ object SpatialNav {
     cache = out;
     cacheAt = now;
     return out;
+  }
+
+  /** Datos de lo que ve el motor en esta pagina, para poder afinarlo. */
+  function diagnose() {
+    var list = collect();
+    var info = { total: list.length, focused: null, tags: {} };
+    for (var i = 0; i < list.length; i++) {
+      var t = (list[i].tagName || '?').toLowerCase();
+      info.tags[t] = (info.tags[t] || 0) + 1;
+    }
+    if (current && inDom(current)) {
+      var r = current.getBoundingClientRect();
+      var cls = '';
+      try { cls = (current.className || '').toString().slice(0, 80); } catch (e) {}
+      info.focused = {
+        tag: (current.tagName || '?').toLowerCase(),
+        id: current.id || '',
+        cls: cls,
+        w: Math.round(r.width),
+        h: Math.round(r.height)
+      };
+    }
+    return JSON.stringify(info);
   }
 
   // ------------------------------------------------------------- geometria
@@ -189,26 +217,29 @@ object SpatialNav {
     return best;
   }
 
-  function reveal(el) {
+  function reveal(el, dir) {
     var r = el.getBoundingClientRect();
     var fully = r.top >= 0 && r.left >= 0 &&
                 r.bottom <= window.innerHeight && r.right <= window.innerWidth;
     if (fully) { return; }
+    // Al avanzar en horizontal se centra tambien en ese eje, que es lo que
+    // hace que los carruseles de caratulas se recorran bien.
+    var inline = (dir === 'left' || dir === 'right') ? 'center' : 'nearest';
     try {
-      el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+      el.scrollIntoView({ block: 'center', inline: inline, behavior: 'smooth' });
     } catch (e) {
       el.scrollIntoView();
     }
   }
 
-  function focus(el) {
+  function focus(el, dir) {
     current = el;
     try {
       if (el.focus) { el.focus({ preventScroll: true }); }
     } catch (e) {
       try { el.focus(); } catch (e2) { /* algunos nodos no son enfocables */ }
     }
-    reveal(el);
+    reveal(el, dir);
     paint();
     // El desplazamiento suave mueve el rectangulo: se repinta al asentarse.
     setTimeout(paint, 160);
@@ -219,7 +250,7 @@ object SpatialNav {
 
   function move(dir) {
     var next = pick(dir);
-    if (next) { focus(next); return 'moved'; }
+    if (next) { focus(next, dir); return 'moved'; }
 
     // Sin candidato en esa direccion: se desplaza la pagina, para que las
     // paginas largas sigan siendo recorribles.
@@ -300,7 +331,8 @@ object SpatialNav {
     move: move,
     activate: activate,
     rescan: rescan,
-    clear: clear
+    clear: clear,
+    diagnose: diagnose
   };
   return 'installed';
 })();
@@ -310,4 +342,7 @@ object SpatialNav {
 
     const val ACTIVATE = "window.__tvnav && window.__tvnav.activate();"
     const val CLEAR = "window.__tvnav && window.__tvnav.clear();"
+
+    /** Devuelve un JSON con lo que el motor ve en la pagina actual. */
+    const val DIAGNOSE = "window.__tvnav ? window.__tvnav.diagnose() : '{}';"
 }

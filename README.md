@@ -62,12 +62,38 @@ Se abre manteniendo **ATRÁS** (o con la tecla MENU si el mando la tiene):
 - Ir a una dirección o buscar
 - Marcadores: añadir, abrir y eliminar
 - Página de inicio: ir y fijar la actual
+- Bloqueador de anuncios y ventanas emergentes, con el recuento de
+  peticiones bloqueadas
 - Recargar, atrás, adelante
 - Modo del mando: **elementos**, **puntero** o **desplazamiento**
 - Vista **escritorio** o **móvil** (cambia el user-agent)
 - Zoom de la página, del 50 % al 200 %
 - Reproducir/pausar y forzar pantalla completa del vídeo
 - Borrar cookies y datos de navegación
+- Diagnóstico de navegación: informa de cuántos elementos detecta el motor
+  en la página, su reparto por etiqueta y cuál tiene el foco
+
+## Bloqueador
+
+Activado por defecto. Actúa en cuatro frentes:
+
+- **Red**: `shouldInterceptRequest` compara cada petición contra una lista de
+  105 dominios de publicidad, rastreo y popunder, por sufijo de dominio, y
+  devuelve una respuesta vacía en las que coinciden. La lista no incluye CDNs
+  ni dominios de reproducción, para no romper el vídeo.
+- **Ventanas emergentes**: `onCreateWindow` las rechaza de raíz, de forma que
+  la página actual se queda donde está — que es justo lo que rompe los
+  popunder.
+- **`window.open`**: se sustituye por una función que devuelve un objeto
+  inerte, para que el script que la llama no falle y la página siga
+  funcionando.
+- **Redirecciones**: una navegación hacia un dominio de la lista se corta
+  antes de cargarse.
+
+Además oculta los huecos publicitarios que quedan vacíos, con una lista de
+selectores deliberadamente conservadora para no ocultar contenido legítimo.
+
+Se puede desactivar desde el menú si alguna web lo necesita.
 
 ## Notas técnicas
 

@@ -45,6 +45,11 @@ class Prefs(context: Context) {
         get() = sp.getInt(KEY_ZOOM, 100)
         set(value) = sp.edit().putInt(KEY_ZOOM, value.coerceIn(MIN_ZOOM, MAX_ZOOM)).apply()
 
+    /** true = bloquear publicidad, rastreadores y ventanas emergentes. */
+    var blockAds: Boolean
+        get() = sp.getBoolean(KEY_BLOCK_ADS, true)
+        set(value) = sp.edit().putBoolean(KEY_BLOCK_ADS, value).apply()
+
     /** true = restaurar la ultima pagina al abrir; false = ir siempre al inicio. */
     var restoreLast: Boolean
         get() = sp.getBoolean(KEY_RESTORE, true)
@@ -108,6 +113,7 @@ class Prefs(context: Context) {
         private const val KEY_DESKTOP_UA = "desktop_ua"
         private const val KEY_ZOOM = "zoom"
         private const val KEY_RESTORE = "restore_last"
+        private const val KEY_BLOCK_ADS = "block_ads"
         private const val KEY_BOOKMARKS = "bookmarks"
     }
 }
