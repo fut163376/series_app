@@ -56,6 +56,17 @@ object JsSnippets {
         })();
     """
 
+    /**
+     * 'true' si la pagina tiene un <video> accesible desde este contexto.
+     * Devuelve 'false' cuando el reproductor vive en un iframe de otro
+     * dominio, caso en el que las teclas deben pasarse al propio reproductor.
+     */
+    val HAS_NATIVE_VIDEO = """
+        (function () { $PICK_VIDEO
+            return __v ? 'true' : 'false';
+        })();
+    """
+
     /** true si hay algun video reproduciendose ahora mismo. */
     val IS_PLAYING = """
         (function () { $PICK_VIDEO

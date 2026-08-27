@@ -56,6 +56,8 @@ class MainActivity : AppCompatActivity() {
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private var longBackHandled = false
+    /** false cuando el reproductor esta en un iframe de otro dominio. */
+    private var hasNativeVideo = false
     private val hideHintRunnable = Runnable { hint.visibility = View.GONE }
 
     // ---------------------------------------------------------------- ciclo
@@ -178,6 +180,7 @@ class MainActivity : AppCompatActivity() {
                 url?.let { if (it.startsWith("http")) prefs.lastUrl = it }
                 installSpatialNav()
                 installAdBlock()
+                refreshVideoReach()
             }
 
             // Las webs de una sola pagina cambian de vista sin recargar.
@@ -212,6 +215,7 @@ class MainActivity : AppCompatActivity() {
                 )
                 fullscreenContainer.visibility = View.VISIBLE
                 webView.visibility = View.GONE
+                refreshVideoReach()
                 cursor.hideNow()
                 js(SpatialNav.CLEAR)
                 enterImmersive(true)
@@ -357,6 +361,17 @@ class MainActivity : AppCompatActivity() {
         if (prefs.blockAds) js(AdBlocker.COSMETIC_JS)
     }
 
+    /**
+     * Averigua si el video es alcanzable desde este contexto. Si no lo es
+     * —reproductor incrustado desde otro dominio— las teclas del mando se
+     * dejan pasar para que las gobierne el propio reproductor.
+     */
+    private fun refreshVideoReach() {
+        webView.evaluateJavascript(JsSnippets.HAS_NATIVE_VIDEO) { raw ->
+            hasNativeVideo = raw?.contains("true") == true
+        }
+    }
+
     /** Paso del puntero: cuanto mas se mantiene pulsado el D-pad, mas rapido va. */
     private fun stepFor(repeat: Int): Float = when {
         repeat == 0 -> 16f
@@ -446,8 +461,11 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Con el video a pantalla completa el mando gobierna la reproduccion.
+        // Con el video a pantalla completa el mando gobierna la reproduccion,
+        // pero solo si el video es alcanzable: si esta incrustado desde otro
+        // dominio, consumir las teclas dejaria el reproductor sin control.
         if (playing) {
+            if (!hasNativeVideo) return false
             when (event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
                 KeyEvent.KEYCODE_NUMPAD_ENTER, KeyEvent.KEYCODE_BUTTON_A -> {
