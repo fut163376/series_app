@@ -58,6 +58,11 @@ class MainActivity : AppCompatActivity() {
     private var longBackHandled = false
     /** false cuando el reproductor esta en un iframe de otro dominio. */
     private var hasNativeVideo = false
+    /**
+     * true mientras el foco esta dentro de un reproductor incrustado desde
+     * otro dominio. En ese estado el mando es suyo y no lo interceptamos.
+     */
+    private var playerFocused = false
     private val hideHintRunnable = Runnable { hint.visibility = View.GONE }
 
     // ---------------------------------------------------------------- ciclo
@@ -178,6 +183,7 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView, url: String?) {
                 super.onPageFinished(view, url)
                 url?.let { if (it.startsWith("http")) prefs.lastUrl = it }
+                playerFocused = false
                 installSpatialNav()
                 installAdBlock()
                 refreshVideoReach()
@@ -438,14 +444,19 @@ class MainActivity : AppCompatActivity() {
         val playing = customView != null
 
         when (event.keyCode) {
+            // Si el video no es alcanzable, la tecla debe llegarle al
+            // reproductor incrustado en lugar de morir aqui.
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY,
             KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                if (!hasNativeVideo) return false
                 js(JsSnippets.TOGGLE_PLAY); return true
             }
             KeyEvent.KEYCODE_MEDIA_FAST_FORWARD, KeyEvent.KEYCODE_MEDIA_NEXT -> {
+                if (!hasNativeVideo) return false
                 js(JsSnippets.seek(SEEK_SECONDS)); showHint("+$SEEK_SECONDS s"); return true
             }
             KeyEvent.KEYCODE_MEDIA_REWIND, KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                if (!hasNativeVideo) return false
                 js(JsSnippets.seek(-SEEK_SECONDS)); showHint("-$SEEK_SECONDS s"); return true
             }
             KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_BUTTON_Y -> {
@@ -481,6 +492,11 @@ class MainActivity : AppCompatActivity() {
             return false
         }
 
+        // Dentro de un reproductor de otro dominio las teclas son suyas: no
+        // podemos gobernar ese video por JS, asi que interceptarlas lo dejaria
+        // sin control ninguno.
+        if (playerFocused) return false
+
         return when (prefs.navMode) {
             Prefs.NAV_SPATIAL -> spatialKey(event)
             Prefs.NAV_CURSOR -> cursorKey(event)
@@ -497,10 +513,31 @@ class MainActivity : AppCompatActivity() {
             KeyEvent.KEYCODE_DPAD_RIGHT -> js(SpatialNav.move("right"))
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
             KeyEvent.KEYCODE_NUMPAD_ENTER, KeyEvent.KEYCODE_BUTTON_A ->
-                js(SpatialNav.ACTIVATE)
+                activateFocused()
             else -> return false
         }
         return true
+    }
+
+    /**
+     * Activa el elemento con el foco. Si es un reproductor incrustado, a
+     * partir de ahi el mando pasa a ser suyo hasta que se pulse ATRAS.
+     */
+    private fun activateFocused() {
+        webView.evaluateJavascript(SpatialNav.ACTIVATE) { raw ->
+            if (raw != null && raw.contains("iframe")) {
+                playerFocused = true
+                showHint("Dentro del reproductor · ATRÁS para volver")
+            }
+        }
+    }
+
+    /** Devuelve el mando a la pagina. */
+    private fun exitPlayerFocus() {
+        playerFocused = false
+        js(SpatialNav.BLUR)
+        webView.requestFocus()
+        showHint("Fuera del reproductor")
     }
 
     /** El D-pad mueve un puntero de raton sobre la pagina. */
@@ -550,6 +587,7 @@ class MainActivity : AppCompatActivity() {
     private fun goBackOrExit() {
         when {
             customView != null -> chromeClient?.onHideCustomView()
+            playerFocused -> exitPlayerFocus()
             webView.canGoBack() -> webView.goBack()
             else -> confirmExit()
         }
@@ -850,6 +888,10 @@ class MainActivity : AppCompatActivity() {
 
             Con el vídeo a pantalla completa, el D-pad izquierda y derecha
             salta en el tiempo y OK reproduce o pausa.
+
+            Cuando el reproductor viene incrustado desde otro sitio, al
+            pulsar OK sobre él el mando pasa a ser suyo: las teclas van
+            directas al reproductor. Pulsa ATRÁS para volver a la página.
 
             Si una web concreta se recorre mal, cambia el «Modo del mando»
             desde este menú: «Puntero» mueve un cursor de ratón y

@@ -46,6 +46,17 @@ Tres formas, de más rápida a más explícita:
 
 El modo elegido se recuerda entre sesiones.
 
+### Reproductores incrustados
+
+Cuando el vídeo viene en un iframe de otro dominio, la política de mismo
+origen impide que la app entre en él o gobierne ese vídeo por JavaScript. En
+ese caso, al pulsar OK sobre el reproductor el mando pasa a ser suyo: el
+D-pad y las teclas multimedia llegan directas al reproductor, que las maneja
+por su cuenta. **ATRÁS** devuelve el mando a la página.
+
+Si ese reproductor no responde al teclado, queda el modo **puntero**, que
+sintetiza toques y sí funciona sobre sus controles.
+
 ### Modos del mando
 
 - **Elementos** (por defecto): el D-pad recorre enlaces, botones, tarjetas y

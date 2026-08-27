@@ -381,6 +381,17 @@ object SpatialNav {
 
   function rescan() { cache = null; paint(); }
 
+  /** Suelta el foco del elemento activo, al salir de un reproductor. */
+  function blur() {
+    try {
+      if (document.activeElement && document.activeElement.blur) {
+        document.activeElement.blur();
+      }
+    } catch (e) { /* algunos contextos no lo permiten */ }
+    paint();
+    return 'ok';
+  }
+
   function clear() {
     current = null;
     if (box) { box.style.display = 'none'; }
@@ -394,6 +405,7 @@ object SpatialNav {
     activate: activate,
     rescan: rescan,
     clear: clear,
+    blur: blur,
     diagnose: diagnose
   };
   return 'installed';
@@ -404,6 +416,8 @@ object SpatialNav {
 
     const val ACTIVATE = "window.__tvnav && window.__tvnav.activate();"
     const val CLEAR = "window.__tvnav && window.__tvnav.clear();"
+
+    const val BLUR = "window.__tvnav && window.__tvnav.blur();"
 
     /** Devuelve un JSON con lo que el motor ve en la pagina actual. */
     const val DIAGNOSE = "window.__tvnav ? window.__tvnav.diagnose() : '{}';"
